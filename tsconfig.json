@@ -1,0 +1,17 @@
+{
+	"compilerOptions": {
+		"strict": false,
+		"outDir": "build",
+		"allowJs": true,
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"resolveJsonModule": true,
+		"esModuleInterop": true,
+		"target": "ESNext",
+		"sourceMap": true,
+		"lib": ["ESNext"],
+		"skipLibCheck": true
+	},
+	"include": ["src/**/*"],
+	"exclude": ["example/**/*"]
+}

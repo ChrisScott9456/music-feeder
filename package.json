@@ -1,0 +1,30 @@
+{
+	"name": "music-feeder",
+	"version": "1.0.0",
+	"description": "Feed generator for new music releases.",
+	"main": "src/index.ts",
+	"scripts": {
+		"start": "tsc && nodemon",
+		"prod": "tsc && index.ts",
+		"build": "tsc",
+		"docker-build": "docker build -t music-rss .",
+		"docker-image": "docker save -o music-rss.tar music-rss:latest",
+		"docker": "npm run docker-build && npm run docker-image"
+	},
+	"author": "ChrisScott9456",
+	"license": "ISC",
+	"dependencies": {
+		"@types/axios": "^0.14.0",
+		"axios": "^1.7.5",
+		"cron": "^3.1.7",
+		"dotenv": "^16.4.5",
+		"js-yaml": "^4.1.0",
+		"moment": "^2.30.1",
+		"typescript": "^5.5.4"
+	},
+	"devDependencies": {
+		"@types/node": "^22.1.0",
+		"nodemon": "^3.1.4",
+		"ts-node": "^10.9.2"
+	}
+}
