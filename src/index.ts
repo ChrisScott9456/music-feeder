@@ -2,9 +2,11 @@ import 'dotenv/config';
 import axios from 'axios';
 import qs from 'qs';
 import fs from 'fs';
-import { SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } from './lib/envVariables';
-import { Album } from './interface/Album';
+import ejs from 'ejs';
+import { OUTPUT_LOCATION, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } from './lib/envVariables';
+import { Album, AlbumResponse } from './interface/Album';
 import { PlaylistTracks } from './interface/Playlist';
+import path from 'path';
 
 const playlistId = 'PLAYIST_ID_HERE';
 
@@ -102,28 +104,35 @@ async function refreshAccessToken(): Promise<string> {
 	}
 }
 
-async function getLatestRelease(artistId: string): Promise<Album[] | null> {
-	try {
-		const accessToken = await getAccessToken();
+async function getArtistAlbums(artistId: string, type?: string): Promise<Album[]> {
+	const albumArr: Album[] = [];
+	let URL = `https://api.spotify.com/v1/artists/${artistId}/albums`;
 
-		const response = await axios.get<{ items: Album[] }>(`https://api.spotify.com/v1/artists/${artistId}/albums`, {
-			headers: {
-				Authorization: `Bearer ${accessToken}`,
-			},
-		});
+	while (URL) {
+		try {
+			const accessToken = await getAccessToken();
 
-		console.log(response.data.items[0].name);
+			const response = await axios.get<AlbumResponse>(URL, {
+				headers: {
+					Authorization: `Bearer ${accessToken}`,
+				},
+				params: {
+					limit: 50,
+					include_groups: type || 'album,single,compilation',
+					// fields: 'next,items.track.artists.name, items.track.artists.id',
+				},
+			});
 
-		// Check if any albums were returned
-		if (response.data.items.length > 0) {
-			return response.data.items; // The most recent album or single
-		} else {
-			console.log('No releases found for this artist.');
-			return null;
+			albumArr.push(...response.data.items);
+
+			// Set the URL as the next URL provided for pagination
+			URL = response.data.next;
+		} catch (error) {
+			console.error('Error fetching playlist from Spotify:', error);
 		}
-	} catch (error) {
-		console.error('Error fetching latest release from Spotify:', error);
 	}
+
+	return albumArr;
 }
 
 async function getFullPlaylist(playlistId: string) {
@@ -159,6 +168,15 @@ async function getFullPlaylist(playlistId: string) {
 	return playlist.items;
 }
 
+interface ArtistCount {
+	name: string;
+	value: {
+		id: string;
+		count: number;
+		exclude: boolean;
+	};
+}
+
 async function extractArtistsFromPlaylist() {
 	const out = await getFullPlaylist(playlistId);
 
@@ -176,13 +194,41 @@ async function extractArtistsFromPlaylist() {
 		artistMap.set(artists[i].name, { id: artists[i].id, count: value });
 	}
 
-	const sortedArtistCount = Array.from(artistMap)
+	const sortedArtistCount: ArtistCount[] = Array.from(artistMap)
 		.map((el) => {
 			return { name: el[0], value: { ...el[1], exclude: false } };
 		})
 		.sort((a, b) => b.value.count - a.value.count);
 
 	fs.writeFileSync('output.json', JSON.stringify(sortedArtistCount, null, 2));
-
 	console.log(sortedArtistCount);
 }
+
+function readInput(path: string): ArtistCount[] {
+	const data = fs.readFileSync(path, 'utf8');
+	return JSON.parse(data);
+}
+
+async function run() {
+	const artistArr = readInput(path.join(__dirname, '..', 'config', 'input.json'));
+
+	let sortedAlbumArr: Album[] = [];
+
+	for (let i = 0; i < 2; i++) {
+		const albumArr = await getArtistAlbums(artistArr[i].value.id);
+		sortedAlbumArr.push(...albumArr);
+	}
+
+	sortedAlbumArr = sortedAlbumArr.sort((a, b) => b.release_date.localeCompare(a.release_date));
+
+	ejs.renderFile(path.join(__dirname, 'templates', 'release.ejs'), { sortedAlbumArr }, (err, str) => {
+		if (err) {
+			console.error(err);
+			return;
+		}
+
+		fs.writeFileSync(`${OUTPUT_LOCATION}/out.md`, str, 'utf-8');
+	});
+}
+
+run();

@@ -21,3 +21,13 @@ export interface Album {
 	artists: Artist[];
 	album_group: string;
 }
+
+export interface AlbumResponse {
+	href: string;
+	items: Album[];
+	limit: number;
+	next: string;
+	offset: number;
+	previous: string;
+	total: number;
+}
