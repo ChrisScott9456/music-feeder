@@ -1,4 +1,4 @@
-<% sortedAlbumArr.forEach(album => { %>
+<% newAlbums.forEach(album => { %>
 # <%= album.name %> 
 ## By: <%= album.artists.map(artist => `[${artist.name}](${artist.external_urls.spotify})`).join(', ') %>
 

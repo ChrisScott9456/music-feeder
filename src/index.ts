@@ -7,6 +7,8 @@ import { OUTPUT_LOCATION, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } from './lib
 import { Album, AlbumResponse } from './interface/Album';
 import { PlaylistTracks } from './interface/Playlist';
 import path from 'path';
+import { createTables, db, DB_TABLES } from './lib/knex';
+import { CronJob } from 'cron';
 
 const playlistId = 'PLAYIST_ID_HERE';
 
@@ -119,7 +121,7 @@ async function getArtistAlbums(artistId: string, type?: string): Promise<Album[]
 				params: {
 					limit: 50,
 					include_groups: type || 'album,single,compilation',
-					// fields: 'next,items.track.artists.name, items.track.artists.id',
+					fields: 'next,items.album_type,items.total_tracks,items.external_urls,items.href,items.id,items.images,items.name,items.release_date,items.type,items.uri,items.artists,items.album_group,',
 				},
 			});
 
@@ -204,31 +206,123 @@ async function extractArtistsFromPlaylist() {
 	console.log(sortedArtistCount);
 }
 
-function readInput(path: string): ArtistCount[] {
-	const data = fs.readFileSync(path, 'utf8');
+function readFile(filePath: string): ArtistCount[] {
+	const data = fs.readFileSync(filePath, 'utf8');
 	return JSON.parse(data);
 }
 
+function writeFile(filePath: string, newData: any) {
+	let content = newData;
+
+	fs.readFile(filePath, 'utf8', (err, data) => {
+		if (err) {
+			if (!err.stack.includes('no such file or directory')) {
+				console.error('Error reading file:', err);
+			}
+			return;
+		}
+
+		content = newData + data;
+	});
+
+	fs.writeFile(filePath, content, 'utf8', (err) => {
+		if (err) {
+			console.error('Error writing to file:', err);
+		}
+	});
+}
+
+function removeObjectDuplicates(arr: Album[]) {
+	const seen = new Map();
+
+	return arr.filter((item) => {
+		if (seen.has(item.id)) {
+			return false; // Skip duplicates based on 'id'
+		}
+		seen.set(item.id, true);
+		return true; // Keep the first occurrence
+	});
+}
+
+function isFromThisYear(releaseDate) {
+	const currentYear = new Date().getFullYear();
+	const releaseYear = releaseDate.split('-')[0]; // Get the year from the release date string (format: YYYY-MM-DD)
+
+	return releaseYear === String(currentYear); // Compare the release year with the current year
+}
+
+function delay(ms) {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function run() {
-	const artistArr = readInput(path.join(__dirname, '..', 'config', 'input.json'));
+	await createTables();
+
+	const artistArr = readFile(path.join(__dirname, '..', 'config', 'input.json'));
 
 	let sortedAlbumArr: Album[] = [];
 
-	for (let i = 0; i < 2; i++) {
+	for (let i = 0; i < artistArr.length; i++) {
 		const albumArr = await getArtistAlbums(artistArr[i].value.id);
-		sortedAlbumArr.push(...albumArr);
+
+		// Only include releases from this year
+		sortedAlbumArr.push(...albumArr.filter((album) => isFromThisYear(album.release_date)));
+
+		// Wait for 200 milliseconds between sets of requests to avoid rate limit issues
+		await delay(100);
 	}
 
-	sortedAlbumArr = sortedAlbumArr.sort((a, b) => b.release_date.localeCompare(a.release_date));
+	// Sort by release date and remove any duplicates in the array
+	sortedAlbumArr = removeObjectDuplicates(sortedAlbumArr.sort((a, b) => b.release_date.localeCompare(a.release_date)));
 
-	ejs.renderFile(path.join(__dirname, 'templates', 'release.ejs'), { sortedAlbumArr }, (err, str) => {
+	console.log(sortedAlbumArr.length);
+
+	const newAlbums: Album[] = [];
+
+	/*
+	 * Iterate across the array of sorted albums and add them to the db
+	 */
+	for (let i = 0; i < sortedAlbumArr.length; i++) {
+		const albumExists = await db(DB_TABLES.ALBUMS).where('id', sortedAlbumArr[i].id).first();
+
+		if (albumExists) {
+			break;
+		}
+
+		await db(DB_TABLES.ALBUMS).insert(sortedAlbumArr[i]).onConflict('id').ignore();
+		newAlbums.push(sortedAlbumArr[i]);
+	}
+
+	if (newAlbums.length) {
+		console.log(`${newAlbums.length} new albums added to the list!`);
+	}
+
+	ejs.renderFile(path.join(__dirname, 'templates', 'release.ejs'), { newAlbums }, (err, str) => {
 		if (err) {
 			console.error(err);
 			return;
 		}
 
-		fs.writeFileSync(`${OUTPUT_LOCATION}/out.md`, str, 'utf-8');
+		writeFile(`${OUTPUT_LOCATION}/MusicFeed.md`, str);
 	});
 }
 
-run();
+export const runCronJob = new CronJob(
+	'0 0 * * *', // Run once a day at midnight
+	async () => {
+		try {
+			await run();
+		} catch (e) {
+			console.error(e);
+		}
+	},
+	null,
+	false,
+	'America/New_York'
+);
+
+try {
+	runCronJob.start();
+} catch (e) {
+	console.error(e);
+}
