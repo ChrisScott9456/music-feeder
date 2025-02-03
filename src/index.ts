@@ -3,7 +3,7 @@ import axios from 'axios';
 import qs from 'qs';
 import fs from 'fs';
 import ejs from 'ejs';
-import { OUTPUT_LOCATION, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } from './lib/envVariables';
+import { SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } from './lib/envVariables';
 import { Album, AlbumResponse } from './interface/Album';
 import { PlaylistTracks } from './interface/Playlist';
 import path from 'path';
@@ -262,7 +262,7 @@ async function run() {
 
 	let sortedAlbumArr: Album[] = [];
 
-	for (let i = 0; i < artistArr.length; i++) {
+	for (let i = 0; i < 2; i++) {
 		const albumArr = await getArtistAlbums(artistArr[i].value.id);
 
 		// Only include releases from this year
@@ -297,13 +297,13 @@ async function run() {
 		console.log(`${newAlbums.length} new albums added to the list!`);
 	}
 
-	ejs.renderFile(path.join(__dirname, 'templates', 'release.ejs'), { newAlbums }, (err, str) => {
+	ejs.renderFile(path.join(__dirname, '..', 'config', 'release.ejs'), { newAlbums }, (err, str) => {
 		if (err) {
 			console.error(err);
 			return;
 		}
 
-		writeFile(`${OUTPUT_LOCATION}/MusicFeed.md`, str);
+		writeFile('/output/MusicFeed.md', str); //! This is a Docker-specific mounted location
 	});
 }
 
@@ -322,7 +322,9 @@ export const runCronJob = new CronJob(
 );
 
 try {
+	console.log('Starting up...');
 	runCronJob.start();
+	run(); // Run once on startup
 } catch (e) {
 	console.error(e);
 }

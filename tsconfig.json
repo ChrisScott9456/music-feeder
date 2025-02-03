@@ -12,6 +12,6 @@
 		"lib": ["ESNext"],
 		"skipLibCheck": true
 	},
-	"include": ["src/**/*"],
-	"exclude": ["example/**/*"]
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules"]
 }

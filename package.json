@@ -7,8 +7,8 @@
 		"start": "tsc && nodemon",
 		"prod": "tsc && index.ts",
 		"build": "tsc",
-		"docker-build": "docker build -t music-rss .",
-		"docker-image": "docker save -o music-rss.tar music-rss:latest",
+		"docker-build": "docker build -t music-feeder .",
+		"docker-image": "docker save -o music-feeder.tar music-feeder:latest",
 		"docker": "npm run docker-build && npm run docker-image"
 	},
 	"author": "ChrisScott9456",

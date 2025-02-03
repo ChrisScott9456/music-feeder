@@ -1,7 +1,7 @@
 FROM node:18-alpine
 
 # Install Python 3 and build-essential tools
-RUN apk add --no-cache python3 py3-pip build-base ffmpeg
+RUN apk add --no-cache python3 py3-pip build-base
 
 # Set the working directory in the container
 WORKDIR /
