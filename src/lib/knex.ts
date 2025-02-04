@@ -12,6 +12,7 @@ export const db = knex(knexConfig);
 
 export enum DB_TABLES {
 	ALBUMS = 'albums',
+	TOKEN = 'refreshToken',
 }
 
 export async function createTables() {
@@ -34,6 +35,15 @@ export async function createTables() {
 			table.string('album_group').notNullable(); // Group type for album (e.g., album, single)
 
 			table.timestamps(true, true); // Timestamps for created_at and updated_at
+		});
+	}
+
+	const tokenTableExists = await db.schema.hasTable(DB_TABLES.TOKEN);
+
+	if (!tokenTableExists) {
+		await db.schema.createTable(DB_TABLES.TOKEN, (table) => {
+			table.integer('id').primary();
+			table.string('refreshUserToken');
 		});
 	}
 }

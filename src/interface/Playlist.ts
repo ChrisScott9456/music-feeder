@@ -1,6 +1,6 @@
 import { ExternalURLs } from './ExternalURLs';
 import { Image } from './Image';
-import { Track } from './Track';
+import { TrackList } from './Track';
 
 export interface Playlist {
 	collaborative: boolean;
@@ -28,7 +28,7 @@ export interface Playlist {
 
 export interface PlaylistTracks {
 	href: string;
-	items: Track[];
+	items: TrackList[];
 	limit: number;
 	next: string;
 	offset: number;

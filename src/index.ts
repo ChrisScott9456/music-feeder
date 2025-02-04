@@ -3,12 +3,13 @@ import axios from 'axios';
 import qs from 'qs';
 import fs from 'fs';
 import ejs from 'ejs';
-import { SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } from './lib/envVariables';
+import { SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_PLAYLIST_ID, SPOTIFY_USER_CODE } from './lib/envVariables';
 import { Album, AlbumResponse } from './interface/Album';
 import { PlaylistTracks } from './interface/Playlist';
 import path from 'path';
 import { createTables, db, DB_TABLES } from './lib/knex';
 import { CronJob } from 'cron';
+import { Track } from './interface/Track';
 
 const playlistId = 'PLAYIST_ID_HERE';
 
@@ -17,37 +18,51 @@ let cachedToken: string | null = null;
 let tokenExpirationTime: number = 0;
 let refreshToken: string | null = null;
 
+let cachedUserToken: string | null = null;
+let tokenUserExpirationTime: number = 0;
+let refreshUserToken: string | null = null;
+
 /**
  * Get access token from Spotify to authorize requests.
  */
-async function getAccessToken(): Promise<string> {
+async function getAccessToken(userToken: boolean = false): Promise<string> {
 	const currentTime = Date.now();
 
 	// If token is still valid, return
-	if (cachedToken && currentTime < tokenExpirationTime) {
+	if (!userToken && cachedToken && currentTime < tokenExpirationTime) {
+		// console.log('cachedToken');
 		return cachedToken;
+	} else if (cachedUserToken && currentTime < tokenUserExpirationTime) {
+		// console.log('cachedUserToken');
+		return cachedUserToken;
 	}
 
 	// If the token is expired and we have a refresh token, try refreshing it
-	if (refreshToken) {
-		try {
-			return await refreshAccessToken();
-		} catch (error) {
-			console.error('Error refreshing access token:', error);
-		}
+	if (!userToken && refreshToken) {
+		// console.log('refreshToken');
+		return await refreshAccessToken();
+	}
+
+	if (refreshUserToken) {
+		// console.log('refreshUserToken');
+		return await refreshAccessToken(true);
 	}
 
 	// If no valid token or refresh token, request a new one
 	try {
-		return await requestNewAccessToken();
+		if (userToken) {
+			// console.log('requestUserToken');
+			return await requestUserToken();
+		} else {
+			// console.log('requestPublicToken');
+			return await requestPublicToken();
+		}
 	} catch (error) {
 		console.error('Error requesting new access token:', error);
 	}
 }
-/**
- * Request a new access token from Spotify.
- */
-async function requestNewAccessToken(): Promise<string> {
+
+async function requestPublicToken(): Promise<string> {
 	const tokenUrl = 'https://accounts.spotify.com/api/token';
 
 	try {
@@ -76,9 +91,44 @@ async function requestNewAccessToken(): Promise<string> {
 }
 
 /**
+ * Request a new access token from Spotify.
+ */
+async function requestUserToken(): Promise<string> {
+	const tokenUrl = 'https://accounts.spotify.com/api/token';
+
+	try {
+		const response = await axios.post(
+			tokenUrl,
+			qs.stringify({
+				grant_type: 'authorization_code',
+				code: SPOTIFY_USER_CODE,
+				redirect_uri: 'http://google.com',
+			}),
+			{
+				headers: {
+					Authorization: 'Basic ' + Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64'),
+					'Content-Type': 'application/x-www-form-urlencoded',
+				},
+			}
+		);
+
+		// Cache the new token and set the expiration time
+		cachedUserToken = response.data.access_token;
+		tokenUserExpirationTime = Date.now() + response.data.expires_in * 1000; // Expiration in milliseconds
+		refreshUserToken = response.data.refresh_token; // Save the refresh token
+
+		await db(DB_TABLES.TOKEN).insert({ id: 1, refreshUserToken }).onConflict('id').merge();
+
+		return cachedUserToken;
+	} catch (error) {
+		console.error('Error requesting access token from Spotify:', error);
+	}
+}
+
+/**
  * Refresh the existing access token.
  */
-async function refreshAccessToken(): Promise<string> {
+async function refreshAccessToken(userToken: boolean = false): Promise<string> {
 	const tokenUrl = 'https://accounts.spotify.com/api/token';
 
 	try {
@@ -86,7 +136,7 @@ async function refreshAccessToken(): Promise<string> {
 			tokenUrl,
 			qs.stringify({
 				grant_type: 'refresh_token',
-				refresh_token: refreshToken,
+				refresh_token: userToken ? refreshUserToken : refreshToken,
 			}),
 			{
 				headers: {
@@ -206,6 +256,53 @@ async function extractArtistsFromPlaylist() {
 	console.log(sortedArtistCount);
 }
 
+async function getAlbumTracks(albums: Album[]) {
+	const trackURIList: string[] = [];
+	try {
+		for (let i = 0; i < 1; i++) {
+			const URL = `https://api.spotify.com/v1/albums/${albums[i].id}/tracks`;
+			const accessToken = await getAccessToken();
+
+			const response = await axios.get<{ items: Track[] }>(URL, {
+				headers: {
+					Authorization: `Bearer ${accessToken}`,
+				},
+				params: {
+					limit: 1,
+				},
+			});
+
+			trackURIList.push(response.data.items[0].uri);
+		}
+	} catch (error) {
+		console.error('Error getting album tracks from Spotify:', error);
+	}
+
+	return trackURIList;
+}
+
+async function writeToNewReleasesPlaylist(trackURIs: string[]) {
+	const URL = `https://api.spotify.com/v1/playlists/${SPOTIFY_PLAYLIST_ID}/tracks`;
+	try {
+		const accessToken = await getAccessToken(true);
+
+		await axios.post(
+			URL,
+			{
+				uris: [trackURIs[0]],
+			},
+			{
+				headers: {
+					Authorization: `Bearer ${accessToken}`,
+					'Content-Type': 'application/json',
+				},
+			}
+		);
+	} catch (error) {
+		console.error('Error adding tracks to playlist in Spotify:', error.response);
+	}
+}
+
 function readFile(filePath: string): ArtistCount[] {
 	const data = fs.readFileSync(filePath, 'utf8');
 	return JSON.parse(data);
@@ -255,14 +352,23 @@ function delay(ms) {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function getRefreshUserTokenFromDB() {
+	const newToken = await db(DB_TABLES.TOKEN).where('id', 1).first();
+	return newToken.refreshUserToken;
+}
+
 async function run() {
 	await createTables();
+
+	// Get refresh token from DB on every run
+	const newToken = await getRefreshUserTokenFromDB();
+	refreshUserToken = newToken;
 
 	const artistArr = readFile(path.join(__dirname, '..', 'config', 'input.json'));
 
 	let sortedAlbumArr: Album[] = [];
 
-	for (let i = 0; i < 2; i++) {
+	for (let i = 0; i < artistArr.length; i++) {
 		const albumArr = await getArtistAlbums(artistArr[i].value.id);
 
 		// Only include releases from this year
@@ -274,8 +380,6 @@ async function run() {
 
 	// Sort by release date and remove any duplicates in the array
 	sortedAlbumArr = removeObjectDuplicates(sortedAlbumArr.sort((a, b) => b.release_date.localeCompare(a.release_date)));
-
-	console.log(sortedAlbumArr.length);
 
 	const newAlbums: Album[] = [];
 
@@ -293,18 +397,23 @@ async function run() {
 		newAlbums.push(sortedAlbumArr[i]);
 	}
 
-	if (newAlbums.length) {
+	if (newAlbums.length > 0) {
+		const trackURIs = await getAlbumTracks(newAlbums);
+		await writeToNewReleasesPlaylist(trackURIs);
+
+		ejs.renderFile(path.join(__dirname, '..', 'config', 'release.ejs'), { newAlbums }, (err, str) => {
+			if (err) {
+				console.error(err);
+				return;
+			}
+
+			writeFile('/output/MusicFeed.md', str); //! This is a Docker-specific mounted location
+		});
+
 		console.log(`${newAlbums.length} new albums added to the list!`);
+	} else {
+		console.log('No new albums to add!');
 	}
-
-	ejs.renderFile(path.join(__dirname, '..', 'config', 'release.ejs'), { newAlbums }, (err, str) => {
-		if (err) {
-			console.error(err);
-			return;
-		}
-
-		writeFile('/output/MusicFeed.md', str); //! This is a Docker-specific mounted location
-	});
 }
 
 export const runCronJob = new CronJob(
