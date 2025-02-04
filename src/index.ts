@@ -259,7 +259,7 @@ async function extractArtistsFromPlaylist() {
 async function getAlbumTracks(albums: Album[]) {
 	const trackURIList: string[] = [];
 	try {
-		for (let i = 0; i < 1; i++) {
+		for (let i = 0; i < albums.length; i++) {
 			const URL = `https://api.spotify.com/v1/albums/${albums[i].id}/tracks`;
 			const accessToken = await getAccessToken();
 
@@ -267,12 +267,9 @@ async function getAlbumTracks(albums: Album[]) {
 				headers: {
 					Authorization: `Bearer ${accessToken}`,
 				},
-				params: {
-					limit: 1,
-				},
 			});
 
-			trackURIList.push(response.data.items[0].uri);
+			trackURIList.push(...response.data.items.map((el) => el.uri));
 		}
 	} catch (error) {
 		console.error('Error getting album tracks from Spotify:', error);
@@ -282,24 +279,27 @@ async function getAlbumTracks(albums: Album[]) {
 }
 
 async function writeToNewReleasesPlaylist(trackURIs: string[]) {
-	const URL = `https://api.spotify.com/v1/playlists/${SPOTIFY_PLAYLIST_ID}/tracks`;
-	try {
-		const accessToken = await getAccessToken(true);
+	// Tracks must be sent in groups of no more than 100 at per request
+	for (let i = 0; i < trackURIs.length; i += 100) {
+		const URL = `https://api.spotify.com/v1/playlists/${SPOTIFY_PLAYLIST_ID}/tracks`;
+		try {
+			const accessToken = await getAccessToken(true);
 
-		await axios.post(
-			URL,
-			{
-				uris: [trackURIs[0]],
-			},
-			{
-				headers: {
-					Authorization: `Bearer ${accessToken}`,
-					'Content-Type': 'application/json',
+			await axios.post(
+				URL,
+				{
+					uris: trackURIs.slice(i, i + 100),
 				},
-			}
-		);
-	} catch (error) {
-		console.error('Error adding tracks to playlist in Spotify:', error.response);
+				{
+					headers: {
+						Authorization: `Bearer ${accessToken}`,
+						'Content-Type': 'application/json',
+					},
+				}
+			);
+		} catch (error) {
+			console.error('Error adding tracks to playlist in Spotify:', error.response);
+		}
 	}
 }
 
@@ -410,7 +410,7 @@ async function run() {
 			writeFile('/output/MusicFeed.md', str); //! This is a Docker-specific mounted location
 		});
 
-		console.log(`${newAlbums.length} new albums added to the list!`);
+		console.log(`${newAlbums.length} new albums with a total of ${trackURIs.length} tracks added to the list!`);
 	} else {
 		console.log('No new albums to add!');
 	}
